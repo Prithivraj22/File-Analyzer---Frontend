@@ -4,7 +4,10 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { FaRegImage, FaUpload, FaTrash, FaTimes, FaCheckCircle } from 'react-icons/fa';
 import axios from 'axios';
 
+// For Render backend:
 axios.defaults.baseURL = 'https://file-analyzer-backend-gev9.onrender.com';
+// For local testing, you can temporarily use:
+// axios.defaults.baseURL = 'http://localhost:3000';
 
 function App() {
   return (
@@ -28,11 +31,13 @@ const Home = () => {
 
   const prepareFilePreview = async (file) => {
     const fileObj = { file, name: file.name, size: file.size };
+
     if (file.type?.startsWith('image/')) {
       fileObj.kind = 'image';
       fileObj.preview = URL.createObjectURL(file);
       return fileObj;
     }
+
     if (file.type?.startsWith('text/') || /\.(md|txt|json|csv|log|xml)$/i.test(file.name)) {
       fileObj.kind = 'text';
       try {
@@ -43,6 +48,7 @@ const Home = () => {
       }
       return fileObj;
     }
+
     fileObj.kind = 'other';
     return fileObj;
   };
@@ -80,7 +86,9 @@ const Home = () => {
 
   const getFilesFromDataTransferItems = async (items) => {
     const supportsEntry =
-      typeof items?.[0]?.webkitGetAsEntry === 'function' || typeof items?.[0]?.getAsEntry === 'function';
+      typeof items?.[0]?.webkitGetAsEntry === 'function' ||
+      typeof items?.[0]?.getAsEntry === 'function';
+
     if (supportsEntry) {
       const entryPromises = [];
       for (let i = 0; i < items.length; i++) {
@@ -199,25 +207,41 @@ const Home = () => {
     });
   };
 
+  /**
+   * PREVIEW:
+   * - Read text in browser (already in f.text)
+   * - Send JSON { filename, text } to /preview
+   * - No multipart/form-data
+   */
   const Preview = async () => {
     if (!files.length) {
       alert('No file selected for preview.');
       return;
     }
+
     const target = files[0];
+
+    if (target.kind !== 'text') {
+      alert('Preview currently supports only text / log files.');
+      return;
+    }
+    if (!target.text) {
+      alert('Could not read file content.');
+      return;
+    }
+
     setPreview(null);
     setSelectedErrorIndex(null);
     setAnalysis(null);
     setLoadingPreview(true);
 
     try {
-      const fd = new FormData();
-      fd.append('file', target.file, target.name);
-
-      const res = await axios.post('/preview', fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      const res = await axios.post('/preview', {
+        filename: target.name,
+        text: target.text,
       });
 
+      // expected: { totalErrors, errors: [{ line_number, raw_text, redacted_text }, ...] }
       setPreview(res.data);
       if (res.data?.errors && res.data.errors.length) setSelectedErrorIndex(0);
     } catch (err) {
@@ -332,7 +356,9 @@ const Home = () => {
                 {files.length > 0 && (
                   <div className="mt-6 space-y-3">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-semibold text-slate-700">Selected Files ({files.length})</h3>
+                      <h3 className="text-sm font-semibold text-slate-700">
+                        Selected Files ({files.length})
+                      </h3>
                       <button
                         onClick={clearAll}
                         className="flex items-center gap-1 text-xs text-red-600 hover:text-red-700 font-medium"
@@ -445,79 +471,76 @@ const Home = () => {
                   )}
                 </div>
 
-{/* Analysis Result */}
-{analysis && (
-  <div>
-    <h3 className="text-md font-semibold text-slate-800 mb-3">Analysis Result</h3>
+                {/* Analysis Result */}
+                {analysis && (
+                  <div>
+                    <h3 className="text-md font-semibold text-slate-800 mb-3">Analysis Result</h3>
 
-    <div className="bg-gradient-to-br from-violet-50 to-purple-50 rounded-xl p-5 border border-violet-200 shadow-sm">
-      <div className="space-y-3">
+                    <div className="bg-gradient-to-br from-violet-50 to-purple-50 rounded-xl p-5 border border-violet-200 shadow-sm">
+                      <div className="space-y-3">
+                        {/* SOURCE */}
+                        <div className="grid grid-cols-4 gap-3 items-center">
+                          <div className="col-span-1 text-xs font-bold text-violet-700 bg-violet-200/80 px-3 py-2 rounded-lg flex items-center justify-center">
+                            SOURCE
+                          </div>
+                          <div className="col-span-3 text-sm text-slate-800 font-medium">
+                            {analysis.analysis?.source || analysis.source || 'N/A'}
+                          </div>
+                        </div>
 
-        {/* SOURCE */}
-        <div className="grid grid-cols-4 gap-3 items-center">
-          <div className="col-span-1 text-xs font-bold text-violet-700 bg-violet-200/80 px-3 py-2 rounded-lg flex items-center justify-center">
-            SOURCE
-          </div>
-          <div className="col-span-3 text-sm text-slate-800 font-medium">
-            {analysis.analysis?.source || analysis.source || 'N/A'}
-          </div>
-        </div>
+                        {/* TYPE */}
+                        <div className="grid grid-cols-4 gap-3 items-center">
+                          <div className="col-span-1 text-xs font-bold text-blue-700 bg-blue-200/80 px-3 py-2 rounded-lg flex items-center justify-center">
+                            TYPE
+                          </div>
+                          <div className="col-span-3 text-sm text-slate-800 font-medium">
+                            {analysis.analysis?.issue_type || 'N/A'}
+                          </div>
+                        </div>
 
-        {/* TYPE */}
-        <div className="grid grid-cols-4 gap-3 items-center">
-          <div className="col-span-1 text-xs font-bold text-blue-700 bg-blue-200/80 px-3 py-2 rounded-lg flex items-center justify-center">
-            TYPE
-          </div>
-          <div className="col-span-3 text-sm text-slate-800 font-medium">
-            {analysis.analysis?.issue_type || 'N/A'}
-          </div>
-        </div>
+                        {/* CAUSE */}
+                        <div className="grid grid-cols-4 gap-3 items-center">
+                          <div className="col-span-1 text-xs font-bold text-red-700 bg-red-200/80 px-3 py-2 rounded-lg flex items-center justify-center">
+                            CAUSE
+                          </div>
+                          <div className="col-span-3 text-sm text-slate-800">
+                            {analysis.analysis?.root_cause || 'N/A'}
+                          </div>
+                        </div>
 
-        {/* CAUSE */}
-        <div className="grid grid-cols-4 gap-3 items-center">
-          <div className="col-span-1 text-xs font-bold text-red-700 bg-red-200/80 px-3 py-2 rounded-lg flex items-center justify-center">
-            CAUSE
-          </div>
-          <div className="col-span-3 text-sm text-slate-800">
-            {analysis.analysis?.root_cause || 'N/A'}
-          </div>
-        </div>
+                        {/* FIX */}
+                        <div className="grid grid-cols-4 gap-3 items-center">
+                          <div className="col-span-1 text-xs font-bold text-green-700 bg-green-200/80 px-3 py-2 rounded-lg flex items-center justify-center">
+                            FIX
+                          </div>
+                          <div className="col-span-3 text-sm text-slate-800">
+                            {analysis.analysis?.suggested_fix || 'N/A'}
+                          </div>
+                        </div>
 
-        {/* FIX */}
-        <div className="grid grid-cols-4 gap-3 items-center">
-          <div className="col-span-1 text-xs font-bold text-green-700 bg-green-200/80 px-3 py-2 rounded-lg flex items-center justify-center">
-            FIX
-          </div>
-          <div className="col-span-3 text-sm text-slate-800">
-            {analysis.analysis?.suggested_fix || 'N/A'}
-          </div>
-        </div>
-
-        {/* SEVERITY / CONFIDENCE */}
-        <div className="grid grid-cols-2 gap-3 pt-3 border-t border-violet-200 mt-2">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-orange-700 bg-orange-200/80 px-3 py-2 rounded-lg">
-              SEVERITY
-            </span>
-            <span className="text-sm text-slate-800 font-medium">
-              {analysis.analysis?.severity || 'N/A'}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-cyan-700 bg-cyan-200/80 px-3 py-2 rounded-lg">
-              CONFIDENCE
-            </span>
-            <span className="text-sm text-slate-800 font-medium">
-              {analysis.analysis?.confidence || 'N/A'}
-            </span>
-          </div>
-        </div>
-
-      </div>
-    </div>
-  </div>
-)}
-
+                        {/* SEVERITY / CONFIDENCE */}
+                        <div className="grid grid-cols-2 gap-3 pt-3 border-t border-violet-200 mt-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-orange-700 bg-orange-200/80 px-3 py-2 rounded-lg">
+                              SEVERITY
+                            </span>
+                            <span className="text-sm text-slate-800 font-medium">
+                              {analysis.analysis?.severity || 'N/A'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-cyan-700 bg-cyan-200/80 px-3 py-2 rounded-lg">
+                              CONFIDENCE
+                            </span>
+                            <span className="text-sm text-slate-800 font-medium">
+                              {analysis.analysis?.confidence || 'N/A'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
